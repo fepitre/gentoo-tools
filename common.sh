@@ -7,6 +7,16 @@ find_qubes_ebuilds() {
     find "$OVERLAYDIR" -type f -name ".qubes-*.ebuild.0" 2>/dev/null
 }
 
+get_version_ebuild() {
+    local ebuild="$1"
+    if [ -e "$ebuild" ]; then
+        ebuild="$(basename "$ebuild")"
+        ebuild="${ebuild/.ebuild/}"
+        version="${ebuild##*-}"
+        echo "$version"
+    fi
+}
+
 update_manifest() {
     local ebuild="$1"
     local GPGID="${2:-"$QUBES_GENTOO_KEYID"}"
@@ -17,7 +27,7 @@ update_manifest() {
     fi
     if [ -e "$ebuild" ]; then
         pkg_dir="$(dirname "$ebuild")"
-        if [ -n "$(git -C "$pkg_dir" diff .)" ] || [ -n "$(git -C "$pkg_dir" status -s .)" ] || [ ! -e $pkg_dir/Manifest ]; then
+        if [ -n "$(git -C "$pkg_dir" diff .)" ] || [ -n "$(git -C "$pkg_dir" status -s .)" ] || [ ! -e "$pkg_dir/Manifest" ]; then
             rm -f "$pkg_dir/Manifest"
             pushd "$pkg_dir" || exit 1
             GNUPG=qubes-gpg-client "$GEMATO" create -s -k "$GPGID" -H "BLAKE2B SHA512" "$pkg_dir"
@@ -40,10 +50,16 @@ bump_version() {
     if [ -n "$version" ]; then
         pkg_dir="$(dirname "$ebuild0")"
         name="${ebuild0/.}"
-        name="${name/.ebuild.0/}"
+        name="$(basename "${name/.ebuild.0/}")"
         pushd "$pkg_dir" || exit 1
         ln -sf "$(basename "$ebuild0")" "${name}-${version}.ebuild"
         git add "${name}-${version}.ebuild"
+        update_manifest "$ebuild"
+        if [ -n "$(git diff .)" ] || [ -n "$(git status -s .)" ]; then
+            commit_msg="app-emulation/$name: bump to version ${version}"
+            git add Manifest
+            git commit -m "$commit_msg"
+        fi
         popd || exit 1
     fi
 }
@@ -51,12 +67,20 @@ bump_version() {
 clear_older_version() {
     local ebuild0="$1"
     pkg_dir="$(dirname "$ebuild0")"
+    name="$(basename "$pkg_dir")"
+    echo "$name"
     pushd "$pkg_dir" || exit 1
     older_ebuilds="$(find . -type f -name "qubes-*.ebuild" 2>/dev/null | sort --version-sort | head -n -2)"
     for ebuild in $older_ebuilds
     do
         rm "$ebuild"
         git rm "$ebuild"
+        update_manifest "$ebuild"
+        if [ -n "$(git diff .)" ] || [ -n "$(git status -s .)" ]; then
+            commit_msg="app-emulation/$name: drop old $(get_version_ebuild "$ebuild")"
+            git add Manifest
+            git commit -m "$commit_msg"
+        fi
     done
     popd || exit 1
 }
@@ -70,8 +94,8 @@ update_overlay() {
         do
             bump_version "$ebuild"
             clear_older_version "$ebuild"
-            update_manifest "$ebuild"
         done
+        git stag || true
     else
         echo "Cannot find overlay directory $OVERLAYDIR"
         exit 1
