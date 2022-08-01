@@ -44,9 +44,13 @@ update_manifest() {
 bump_version() {
     local ebuild0="$1"
     repo="$(grep -R QubesOS/qubes- "$ebuild0")"
+    branch=master
+    if grep -R release4.1 "$ebuild0"; then
+        branch="release4.1"
+    fi
     qubes_name="${repo//*qubes-/}"
     qubes_name="${qubes_name//.git\"/}"
-    version=$(curl --silent https://raw.githubusercontent.com/qubesos/qubes-${qubes_name}/master/version)
+    version=$(curl --silent https://raw.githubusercontent.com/qubesos/qubes-${qubes_name}/${branch}/version)
     if [ -n "$version" ]; then
         pkg_dir="$(dirname "$ebuild0")"
         name="${ebuild0/.}"
@@ -94,7 +98,6 @@ update_overlay() {
             bump_version "$ebuild"
             clear_older_version "$ebuild"
         done
-        #git stag || true
     else
         echo "Cannot find overlay directory $OVERLAYDIR"
         return 1
